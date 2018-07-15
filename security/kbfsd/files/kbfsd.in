@@ -40,15 +40,22 @@ load_rc_config "${name}"
 : "${kbfsd_username:?'kbfsd_username cannot be empty.'}"
 : "${kbfsd_mountpoint:=/keybase}"
 
-# command="/usr/local/bin/kbfsfuse"
-command="/usr/bin/su"
-command_args="${kbfsd_username} -c 'daemon %%LOCALBASE%%/bin/kbfsfuse -log-to-file ${kbfsd_mountpoint}'"
+command="%%LOCALBASE%%/bin/kbfsfuse"
+command_args="-log-to-file ${kbfsd_mountpoint}"
 
 start_precmd='kbfsd_prestart'
-# start_cmd='kbfsd_start'
-stop_cmd=':'
+start_cmd='kbfsd_start'
+# stop_cmd is not needed since procname and pidfile are set.
 
-kbfsd_modules='fuse'
+# This location is used by many other Keybase-related PID files.
+pidfile="/home/${kbfsd_username}/.config/keybase/kbfsd.${kbfsd_username}.pid"
+# The process name is equal to "daemon" because kbfsfuse is started by
+# daemon(8).
+procname="daemon"
+
+required_dirs="${kbfsd_mountpoint}"
+required_files="/home/${kbfsd_username}/.config/keybase/kbfsd.sock /home/${kbfsd_username}/.config/keybase/keybased.sock"
+required_modules='fuse'
 
 kbfsd_prestart()
 {
@@ -67,13 +74,6 @@ kbfsd_prestart()
 		err 1 "Cannot set ${kbfsd_username} as the owner of ${kbfsd_mountpoint}."
 	fi
 
-	# Load required modules.
-	for _m in ${kbfsd_modules}; do
-		if ! load_kld ${_m}; then
-			return 1
-		fi
-	done
-
 	# Make it possible to mount filesystems as a normal user.
 	if ! sysctl vfs.usermount=1 > /dev/null 2>&1; then
 		err 1 "Cannot set vfs.usermount to 1."
@@ -86,20 +86,21 @@ kbfsd_prestart()
 		err 1 "Cannot add ${kbfsd_username} to the operator group."
 	fi
 
+	# The Keybase client has to be initiated so that
+	# "/home/${kbfsd_username}/.config/keybase/keybased.sock" is present.
+	su "${kbfsd_username}" -c "keybase fs ls ${kbfsd_mountpoint} > /dev/null 2>&1"
+
 	return 0
 }
 
 kbfsd_start()
 {
-	# The Keybase client has to be initiated so that
-	# "/home/${kbfsd_username}/.config/keybase/keybased.sock" is present.
-	su "${kbfsd_username}" -c "keybase fs ls ${kbfsd_mountpoint} > /dev/null 2>&1"
-
+	check_pidfile "${pidfile}" "${procname}"
 	# It has to be done manually because the su(1) mechanism present
 	# in rc.subr(8) uses the "-m" flag, which causes kbfsfuse to look
 	# for files in root's directories instead of the directories of
 	# ${kbfsd_username}.
-	su "${kbfsd_username}" -c "${command} ${command_args}"
+	daemon -P "${pidfile}" su "${kbfsd_username}" -c "${command} ${command_args}"
 }
 
 run_rc_command "$1"
