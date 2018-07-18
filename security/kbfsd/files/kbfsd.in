@@ -39,6 +39,7 @@ load_rc_config "${name}"
 : "${kbfsd_enable:=no}"
 : "${kbfsd_username:?'kbfsd_username cannot be empty.'}"
 : "${kbfsd_mountpoint:=/keybase}"
+: "${kbfsd_keybase_username:="${kbfsd_username}"}"
 
 command="%%LOCALBASE%%/bin/kbfsfuse"
 command_args="-log-to-file ${kbfsd_mountpoint}"
@@ -66,6 +67,9 @@ kbfsd_prestart()
 		err 1 "kbfsd_username is set to '${kbfsd_username}' which is not a valid user."
 	fi
 
+	# Attempt to unmount in case there are some leftovers after
+	# previous kbfsfuse.
+	umount "${kbfsd_mountpoint}" > /dev/null 2>&1
 	# Create the mountpoint for the filesystem.
 	if ! mkdir -p -- "${kbfsd_mountpoint}"; then
 		err 1 "Cannot create the '${kbfsd_mountpoint}' directory.'"
@@ -87,8 +91,10 @@ kbfsd_prestart()
 	fi
 
 	# The Keybase client has to be initiated so that
-	# "/home/${kbfsd_username}/.config/keybase/keybased.sock" is present.
-	su "${kbfsd_username}" -c "keybase fs ls ${kbfsd_mountpoint} > /dev/null 2>&1"
+	# "/home/${kbfsd_username}/.config/keybase/keybased.sock" and
+	# "/home/${kbfsd_username}/.config/keybase/kbfsd.sock" are present.
+	su "${kbfsd_username}" -c "%%LOCALBASE%%/keybase login ${kbfsd_keybase_username}"
+	su "${kbfsd_username}" -c "%%LOCALBASE%%/keybase fs ls ${kbfsd_mountpoint} > /dev/null 2>&1"
 
 	return 0
 }
@@ -100,7 +106,7 @@ kbfsd_start()
 	# in rc.subr(8) uses the "-m" flag, which causes kbfsfuse to look
 	# for files in root's directories instead of the directories of
 	# ${kbfsd_username}.
-	daemon -P "${pidfile}" su "${kbfsd_username}" -c "${command} ${command_args}"
+	daemon -p "${pidfile}" su "${kbfsd_username}" -c "${command} ${command_args}"
 }
 
 run_rc_command "$1"
